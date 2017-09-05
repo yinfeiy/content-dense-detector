@@ -10,6 +10,7 @@ from tensorflow.contrib.tensorboard.plugins import projector
 
 W2VModelFILE="/mnt/data/workspace/nlp/w2v_models/PubMed-w2v.bin"
 MODE_TRAIN = "train"
+GENRES = ["Business", "Science", "Sports", "USIntlRelations"]
 
 class NNModel:
 
@@ -284,16 +285,16 @@ def main():
     model = NNModel(
             mode=FLAGS.mode,
             is_classifier=True,
-            encoder="CNN",
+            encoder="LSTM",
             num_tasks=1,
-            task_names=["Sports"],
+            task_names=[FLAGS.genre],
             max_document_length=FLAGS.max_document_length,
             cnn_filter_sizes=list(map(int, FLAGS.cnn_filter_sizes.split(","))),
             cnn_num_filters=FLAGS.cnn_num_filters,
             lstm_bidirectionral=FLAGS.lstm_bidirectionral,
             lstm_num_layers=FLAGS.lstm_num_layers)
 
-    document_reader = nyt_reader.NYTReader(genre="Business")
+    document_reader = nyt_reader.NYTReader(genre=FLAGS.genre)
 
     if FLAGS.mode == MODE_TRAIN:
         nn_utils.train(model, document_reader, FLAGS)
@@ -301,6 +302,7 @@ def main():
 
 if __name__ == "__main__":
     flags = tf.app.flags
+    flags.DEFINE_string("genre", "Business", "Genre name")
     flags.DEFINE_string("mode", "train", "Model mode")
     flags.DEFINE_integer("batch_size", 64, "Batch Size (default: 64)")
     flags.DEFINE_integer("num_epochs", 100, "Number of training epochs (default: 200)")
