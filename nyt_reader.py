@@ -2,8 +2,7 @@ import os, sys, glob
 import yaml
 
 class NYTReader:
-    DATA_PATH = "/mnt/data/workspace/nlp/informative/data/lead_sentence/"
-    ROOT_PATH = "/mnt/data/workspace/nlp/informative/data//"
+    ROOT_PATH = "/mnt/data/workspace/nlp/content-dense-detector/data/"
 
     THRESHOLD = {
             "Business": [0.33, 0.61],
@@ -33,27 +32,25 @@ class NYTReader:
                 self.ROOT_PATH, "fnames/{0}.ab.fname".format(self._genre))
         fn_scores = os.path.join(
                 self.ROOT_PATH, "scores/{0}.ab.score".format(self._genre))
+        fn_texts = os.path.join(self.ROOT_PATH, 'texts/{0}.text'.format(self._genre))
 
-        fnames = open(fn_fnames).readlines()
+        fnames = [ fname.strip() for fname in open(fn_fnames).readlines() ]
         scores = [ float(x.split()[1]) for x in open(fn_scores).readlines() ]
+        texts = [ text.strip() for text in open(fn_texts).readlines() ]
 
-        for fname, score in zip(fnames, scores):
+        for fname, score, text in zip(fnames, scores, texts):
             fname = fname.strip()
             if score >= self.THRESHOLD[self._genre][1]:
                 self.docs[fname] = {"label": 1}
             elif score <= self.THRESHOLD[self._genre][0]:
                 self.docs[fname] = {"label": 0}
+            else:
+                continue
+            self.docs[fname]['text'] = text
 
-        for fname in self.docs.keys():
-            fname_full = os.path.join(self.DATA_PATH, fname.replace("txt","sentence"))
-            if os.path.exists(fname_full):
-                item = yaml.load(open(fname_full).read())
-                if item:
-                    self.docs[fname].update(item)
-                #print " ".join(item["sentence_0"]["words"])
 
-        fnames = [fn for fn in self.docs.keys() if "sentence_0" in self.docs[fn]]
-
+        fnames = self.docs.keys()
+        fnames.sort()
         num = len(fnames)
         th = int(num*0.8)
         self.train_ids = fnames[:th]
@@ -63,18 +60,7 @@ class NYTReader:
         texts = []
         ys = []
         for docid in docids:
-            try:
-                sent_ids = [key for key in self.docs[docid] if isinstance(key, str) and key.startswith("sentence_") ]
-            except:
-                print docid
-                print self.docs[docid]
-                exit()
-            sent_ids.sort()
-            text = ""
-            for sid in sent_ids:
-                sent_text = " ".join(self.docs[docid][sid]["words"])
-                text = text + " " + sent_text
-            texts.append(text)
+            texts.append(self.docs[docid]['text'])
             ys.append([self.docs[docid]['label']])
 
         return texts, ys

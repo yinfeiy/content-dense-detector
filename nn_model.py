@@ -84,7 +84,8 @@ class NNModel:
             self._vocab.save(os.path.join(self.checkpoint_dir, "vocab"))
 
             # Insert init embedding for <UNK>
-            init_embedding = np.vstack([np.zeros(self._embedding_size)*0.1, init_embedding])
+            init_embedding = np.vstack(
+                    [np.random.normal(size=self._embedding_size), init_embedding])
 
             vocab_size = len(self._vocab.vocabulary_)
             with tf.variable_scope("Word_Embedding"):
@@ -126,25 +127,21 @@ class NNModel:
             gts = tf.expand_dims(output[:, idx], -1)
             wts = tf.expand_dims(weights[:, idx], -1)
             with tf.variable_scope("{0}_regressor".format(self._task_names[idx])):
-                l2_loss = tf.constant(0.0)
 
-                W = tf.get_variable(
-                    "W",
-                    shape=[self._encoding_size, self._num_tasks],
-                    initializer=tf.contrib.layers.xavier_initializer())
-                b = tf.Variable(tf.constant(0.1, shape=[self._num_tasks]), name="b")
-                logits = tf.nn.xw_plus_b(input_encoded, W, b, name="scores")
+                labels = tf.concat([1-gts, gts], 1)
+                labels = tf.Print(labels, [labels], "labels: ", summarize=6)
+                logits = tf.layers.dense(input_encoded, 2,
+                        kernel_regularizer=tf.contrib.layers.l2_regularizer(
+                            self._l2_reg_lambda))
 
-                #predictions = tf.argmax(scores, 1, name="predictions")
 
-                l2_loss += tf.nn.l2_loss(W)
-                l2_loss += tf.nn.l2_loss(b)
-                losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=gts)
+                predictions = tf.argmax(logits, 1, name="predictions")
+                predictions = tf.Print(predictions, [predictions], "Pred: ")
+                pooled_logits.append(tf.nn.softmax(logits))
 
-                logits = tf.sigmoid(logits)
-                pooled_logits.append(logits)
+                losses = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels)
 
-                predictions = tf.to_float(logits>0.5)
+
 
                 self.eval_metrics["{0}/Accuracy".format(self._task_names[idx])] = (
                         tf.metrics.accuracy(gts, predictions))
@@ -153,7 +150,7 @@ class NNModel:
                 self.eval_metrics["{0}/Recall".format(self._task_names[idx])] = (
                         tf.metrics.recall(gts, predictions))
 
-                total_loss = total_loss + tf.reduce_mean(losses) + self._l2_reg_lambda * l2_loss
+                total_loss = total_loss + tf.reduce_mean(losses)
 
         return logits, total_loss
 
@@ -285,7 +282,7 @@ def main():
     model = NNModel(
             mode=FLAGS.mode,
             is_classifier=True,
-            encoder="LSTM",
+            encoder=FLAGS.encoder,
             num_tasks=1,
             task_names=[FLAGS.genre],
             max_document_length=FLAGS.max_document_length,
@@ -302,20 +299,21 @@ def main():
 
 if __name__ == "__main__":
     flags = tf.app.flags
-    flags.DEFINE_string("genre", "Business", "Genre name")
+    flags.DEFINE_string("genre", "Science", "Genre name")
     flags.DEFINE_string("mode", "train", "Model mode")
     flags.DEFINE_integer("batch_size", 64, "Batch Size (default: 64)")
     flags.DEFINE_integer("num_epochs", 100, "Number of training epochs (default: 200)")
-    tf.flags.DEFINE_integer("evaluate_every", 10,
+    tf.flags.DEFINE_integer("evaluate_every", 50,
         "Evaluate model on dev set after this many steps (default: 100)")
     tf.flags.DEFINE_integer("checkpoint_every", 1000,
         "Save model after this many steps (default: 1000)")
     flags.DEFINE_float("dropout", 0.4, "dropout")
+    flags.DEFINE_float("learning_rate", 1e-3, "learning rate")
     flags.DEFINE_integer("max_document_length", 300, "Max document length")
     flags.DEFINE_bool("lstm_bidirectionral", False,
         "Whther lstm is undirectional or bidirectional")
     flags.DEFINE_integer("lstm_num_layers", 2, "Number of layers of LSTM")
-    flags.DEFINE_string("encoder", "LSTM", "Type of encoder used to embed document")
+    flags.DEFINE_string("encoder", "CNN", "Type of encoder used to embed document")
     flags.DEFINE_string("cnn_filter_sizes", "3,4,5", "Filter sizes in CNN encoder")
     flags.DEFINE_integer("cnn_num_filters", 32,
         "Number of filters per filter size in CNN encoder")

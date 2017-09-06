@@ -43,7 +43,7 @@ def train(model, document_reader, FLAGS):
         total_loss = model.loss + reg_loss
 
         global_step = tf.Variable(0, name="global_step", trainable=False)
-        optimizer = tf.train.AdamOptimizer(1e-3)
+        optimizer = tf.train.AdamOptimizer(FLAGS.learning_rate)
         grads_and_vars = optimizer.compute_gradients(total_loss)
         train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
 
@@ -61,7 +61,7 @@ def train(model, document_reader, FLAGS):
             x_test_bw = list(model._vocab.transform(x_test_bw_text))
             vars.append(x_train_bw)
 
-        train_batches = data_utils.batch_iter(list(zip(*vars)), FLAGS.batch_size, FLAGS.num_epochs)
+        train_batches = batch_iter(list(zip(*vars)), FLAGS.batch_size, FLAGS.num_epochs)
 
         with tf.Session() as sess:
             sw_train = tf.summary.FileWriter(model.checkpoint_dir, sess.graph)
@@ -74,7 +74,8 @@ def train(model, document_reader, FLAGS):
             for name, (value_op, update_op) in model.eval_metrics.items():
                 train_updates.append(update_op)
                 summaries.append(
-                        tf.summary.scalar(name, value_op))
+                        tf.summary.scalar(name,
+                            tf.Print(value_op, [value_op], name)))
 
             summaries.append(tf.summary.scalar("model_loss", model.loss))
             summaries.append(tf.summary.scalar("reg_loss", reg_loss))
@@ -108,7 +109,8 @@ def train(model, document_reader, FLAGS):
                 _, step, scores, loss, train_summaries = sess.run(
                         [train_op, global_step, pred_op, loss_op, summary_op],
                         feed_dict)
-                sw_train.add_summary(train_summaries, step)
+                if step % 10 == 0:
+                    sw_train.add_summary(train_summaries, step)
 
 
                 if step % FLAGS.checkpoint_every == 0:
