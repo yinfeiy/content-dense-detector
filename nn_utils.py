@@ -74,8 +74,8 @@ def train(model, document_reader, FLAGS):
             for name, (value_op, update_op) in model.eval_metrics.items():
                 train_updates.append(update_op)
                 summaries.append(
-                        tf.summary.scalar(name,
-                            tf.Print(value_op, [value_op], name)))
+                        tf.summary.scalar(name, value_op))
+                            # tf.Print(value_op, [value_op], name)))
 
             summaries.append(tf.summary.scalar("model_loss", model.loss))
             summaries.append(tf.summary.scalar("reg_loss", reg_loss))
@@ -133,5 +133,8 @@ def train(model, document_reader, FLAGS):
                     sess.run(updates_op, feed_dict)
                     scores, loss, test_summaries = sess.run(
                             [pred_op, loss_op, summary_op], feed_dict)
+
+                    print "Test: "
+                    print test_summaries
 
                     sw_test.add_summary(test_summaries, step)

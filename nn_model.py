@@ -25,8 +25,9 @@ class NNModel:
             l2_reg_lambda=0.1,
             cnn_filter_sizes=[3,4,5],
             cnn_num_filters=128,
-            lstm_num_layers=2,
-            lstm_bidirectionral=False):
+            rnn_bidirectionral=False,
+            rnn_cell_type="GRU",
+            rnn_num_layers=2):
 
         self._train = True if mode == MODE_TRAIN else False
 
@@ -44,9 +45,10 @@ class NNModel:
         self._cnn_filter_sizes = cnn_filter_sizes
         self._cnn_num_filters = cnn_num_filters
 
-        # LSTM params
-        self._lstm_num_layers = lstm_num_layers
-        self._lstm_bidirectional = lstm_bidirectionral
+        # RNN params
+        self._rnn_bidirectional = rnn_bidirectionral
+        self._rnn_cell_type = rnn_cell_type
+        self._rnn_num_layers = rnn_num_layers
 
         # Hyper-params
         self._l2_reg_lambda = l2_reg_lambda
@@ -66,7 +68,7 @@ class NNModel:
         self.input_w = tf.placeholder(tf.float32, [None, self._num_tasks], name="input_w")
         self.dropout = tf.placeholder(tf.float32, name="dropout_prob")
 
-        if self._lstm_bidirectional:
+        if self._rnn_bidirectional:
             self.input_x_bw = tf.placeholder(tf.int32,
                     [None, self._max_document_length], name="input_x")
         else:
@@ -103,8 +105,8 @@ class NNModel:
 
         if self._encoder == "CNN":
             input_encoded = self._CNNLayers(embeddings)
-        elif self._encoder == "LSTM":
-            input_encoded = self._LSTMLayers(embeddings)
+        elif self._encoder == "RNN":
+            input_encoded = self._RNNLayers(embeddings)
 
         if self._is_classifier:
             pred_scores, loss = self._classifier(input_encoded, self.input_y, self.input_w)
@@ -243,30 +245,26 @@ class NNModel:
         return cnn_encoding
 
 
-    def _LSTMLayers(self, embeddings):
+    def _RNNLayers(self, embeddings):
         _, fw_embeddings = self._LookupEmbeddings(embeddings, self.input_x)
 
-        if self._lstm_bidirectional:
+        if self.rnn_bidirectional:
             bw_embeddings = self._LookupEmbeddings(embeddings, self.input_x_bw)
 
-        with tf.variable_scope("LSTM"):
+        with tf.variable_scope("RNN"):
 
-            fw_cell = lambda: tf.nn.rnn_cell.DropoutWrapper(
-                    tf.contrib.rnn.LSTMCell(
-                        num_units=self._embedding_size,
-                        num_proj=self._embedding_size,
-                        state_is_tuple=True),
-                    input_keep_prob=1 - self.dropout / 2.0,
-                    output_keep_prob=1 - self.dropout / 2.0,
-                    variational_recurrent=True,
-                    input_size=self._embedding_size,
-                    dtype=tf.float32)
-            fw_cells= tf.contrib.rnn.MultiRNNCell(
-                    [fw_cell() for x in range(self._lstm_num_layers)], state_is_tuple=True)
-            fw_proj, fw_state = tf.nn.dynamic_rnn(fw_cells, fw_embeddings,
+            if self._rnn_cell_type == "GRU":
+                fw_cells= tf.contrib.rnn.MultiRNNCell(
+                        [tf.nn.rnn_cell.GRUCell(self._embedding_size)
+                            for x in range(self._rnn_num_layers)], state_is_tuple=True)
+            elif self._rnn_cell_type == "LSTM":
+                fw_cells= tf.contrib.rnn.MultiRNNCell(
+                        [tf.nn.rnn_cell.LSTMCell(self._embedding_size)
+                            for x in range(self._rnn_num_layers)], state_is_tuple=True)
+            _, fw_state = tf.nn.dynamic_rnn(fw_cells, fw_embeddings,
                     sequence_length=self.input_l, dtype=tf.float32)
 
-            fw_encoding = fw_state[-1][1]
+            fw_encoding = fw_state[-1]
 
             if self._lstm_bidirectional:
                 pass
@@ -288,8 +286,9 @@ def main():
             max_document_length=FLAGS.max_document_length,
             cnn_filter_sizes=list(map(int, FLAGS.cnn_filter_sizes.split(","))),
             cnn_num_filters=FLAGS.cnn_num_filters,
-            lstm_bidirectionral=FLAGS.lstm_bidirectionral,
-            lstm_num_layers=FLAGS.lstm_num_layers)
+            rnn_cell_type=FLAGS.rnn_cell_type,
+            rnn_bidirectionral=FLAGS.rnn_bidirectionral,
+            rnn_num_layers=FLAGS.rnn_num_layers)
 
     document_reader = nyt_reader.NYTReader(genre=FLAGS.genre)
 
@@ -310,10 +309,11 @@ if __name__ == "__main__":
     flags.DEFINE_float("dropout", 0.4, "dropout")
     flags.DEFINE_float("learning_rate", 1e-3, "learning rate")
     flags.DEFINE_integer("max_document_length", 300, "Max document length")
-    flags.DEFINE_bool("lstm_bidirectionral", False,
-        "Whther lstm is undirectional or bidirectional")
-    flags.DEFINE_integer("lstm_num_layers", 2, "Number of layers of LSTM")
-    flags.DEFINE_string("encoder", "CNN", "Type of encoder used to embed document")
+    flags.DEFINE_bool("rnn_bidirectionral", False,
+        "Whther rnn is undirectional or bidirectional")
+    flags.DEFINE_string("rnn_cell_type", "GRU", "RNN cell type, GRU or LSTM")
+    flags.DEFINE_integer("rnn_num_layers", 2, "Number of layers of RNN")
+    flags.DEFINE_string("encoder", "RNN", "Type of encoder used to embed document")
     flags.DEFINE_string("cnn_filter_sizes", "3,4,5", "Filter sizes in CNN encoder")
     flags.DEFINE_integer("cnn_num_filters", 32,
         "Number of filters per filter size in CNN encoder")
