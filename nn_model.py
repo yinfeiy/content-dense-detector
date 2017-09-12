@@ -302,7 +302,7 @@ def main():
 
 if __name__ == "__main__":
     flags = tf.app.flags
-    flags.DEFINE_string("genre", "Science", "Genre name")
+    flags.DEFINE_string("genre", "Business", "Genre name")
     flags.DEFINE_string("mode", "train", "Model mode")
     flags.DEFINE_integer("batch_size", 64, "Batch Size (default: 64)")
     flags.DEFINE_integer("num_epochs", 100, "Number of training epochs (default: 100)")

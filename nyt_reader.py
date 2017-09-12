@@ -7,7 +7,8 @@ class NYTReader:
     THRESHOLD = {
             "Business": [0.33, 0.61],
             "Science": [0.23, 0.47],
-            "Sports": [0.287, 0.497]
+            "Sports": [0.287, 0.497],
+            "USIntlRelations": [0.327, 0.557]
             }
 
     def __init__(self, genre):
