@@ -56,7 +56,7 @@ def train(model, document_reader, FLAGS):
         x_test = list(model._vocab.transform(x_test_text))
 
         vars = [x_train, x_train_l, y_train]
-        if FLAGS.lstm_bidirectionral:
+        if FLAGS.rnn_bidirectional:
             x_train_bw = list(model._vocab.transform(x_train_bw_text))
             x_test_bw = list(model._vocab.transform(x_test_bw_text))
             vars.append(x_train_bw)
@@ -88,7 +88,7 @@ def train(model, document_reader, FLAGS):
                 sess.run([reset_op, table_init_op])
 
                 try:
-                    if FLAGS.lstm_bidirectionral:
+                    if FLAGS.rnn_bidirectional:
                         x_batch, x_l_batch, y_batch, x_bw_batch= zip(*batch)
                     else:
                         x_batch, x_l_batch, y_batch =  zip(*batch)
@@ -102,7 +102,7 @@ def train(model, document_reader, FLAGS):
                     model.input_w: np.ones((len(y_batch), len(y_batch[0]))),
                     model.dropout: FLAGS.dropout
                     }
-                if FLAGS.lstm_bidirectionral:
+                if FLAGS.rnn_bidirectional:
                     feed_dict[model.input_x_bw] = x_bw_batch
 
                 sess.run(updates_op, feed_dict)
@@ -127,14 +127,11 @@ def train(model, document_reader, FLAGS):
                             model.input_w: np.ones((len(y_test), len(y_test[0]))),
                             model.dropout: 0.0
                             }
-                    if FLAGS.lstm_bidirectionral:
+                    if FLAGS.rnn_bidirectional:
                         feed_dict[model.input_x_bw] = x_test_bw
 
                     sess.run(updates_op, feed_dict)
                     scores, loss, test_summaries = sess.run(
                             [pred_op, loss_op, summary_op], feed_dict)
-
-                    print "Test: "
-                    print test_summaries
 
                     sw_test.add_summary(test_summaries, step)

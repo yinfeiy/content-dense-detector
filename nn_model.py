@@ -9,7 +9,11 @@ from tensorflow.contrib import learn
 from tensorflow.contrib.tensorboard.plugins import projector
 
 W2VModelFILE="/mnt/data/workspace/nlp/w2v_models/PubMed-w2v.bin"
+#W2VModelFILE="/mnt/data/workspace/nlp/w2v_models/GoogleNews-vectors-negative300.bin"
+EMBEDDING_DIM=200
+
 MODE_TRAIN = "train"
+MODE_INFER = "inference"
 GENRES = ["Business", "Science", "Sports", "USIntlRelations"]
 
 class NNModel:
@@ -25,7 +29,7 @@ class NNModel:
             l2_reg_lambda=0.1,
             cnn_filter_sizes=[3,4,5],
             cnn_num_filters=128,
-            rnn_bidirectionral=False,
+            rnn_bidirectional=False,
             rnn_cell_type="GRU",
             rnn_num_layers=2):
 
@@ -35,7 +39,7 @@ class NNModel:
         self._max_document_length = max_document_length
         self._num_tasks = num_tasks
         self._is_classifier = is_classifier
-        self._embedding_size = 200
+        self._embedding_size = EMBEDDING_DIM
         self._encoder = encoder
         self._encoding_size = 300
         self._vocab = None
@@ -46,7 +50,7 @@ class NNModel:
         self._cnn_num_filters = cnn_num_filters
 
         # RNN params
-        self._rnn_bidirectional = rnn_bidirectionral
+        self._rnn_bidirectional = rnn_bidirectional
         self._rnn_cell_type = rnn_cell_type
         self._rnn_num_layers = rnn_num_layers
 
@@ -70,37 +74,27 @@ class NNModel:
 
         if self._rnn_bidirectional:
             self.input_x_bw = tf.placeholder(tf.int32,
-                    [None, self._max_document_length], name="input_x")
+                    [None, self._max_document_length], name="input_x_bw")
         else:
             self.input_x_bw = None
 
-        if self._train:
-            # Assuming input text is pre-tokenized and splited by space
-            vocab, init_embedding = self._LoadInitEmbeddings()
+        # Assuming input text is pre-tokenized and splited by space
+        vocab, init_embedding = self._LoadInitEmbeddings()
 
-            def _tokenizer(xs):
-                return [x.split(" ") for x in xs]
-            self._vocab = learn.preprocessing.VocabularyProcessor(
-                    self._max_document_length, tokenizer_fn=_tokenizer)
-            self._vocab.fit(vocab)
-            self._vocab.save(os.path.join(self.checkpoint_dir, "vocab"))
+        def _tokenizer(xs):
+            return [x.split(" ") for x in xs]
+        self._vocab = learn.preprocessing.VocabularyProcessor(
+                self._max_document_length, tokenizer_fn=_tokenizer)
+        self._vocab.fit(vocab)
 
-            # Insert init embedding for <UNK>
-            init_embedding = np.vstack(
-                    [np.random.normal(size=self._embedding_size), init_embedding])
+        # Insert init embedding for <UNK>
+        init_embedding = np.vstack(
+                [np.random.normal(size=self._embedding_size), init_embedding])
 
-            vocab_size = len(self._vocab.vocabulary_)
-            with tf.variable_scope("Word_Embedding"):
-                embeddings = tf.get_variable(name="W", shape=init_embedding.shape,
-                        initializer=tf.constant_initializer(init_embedding), trainable=False)
-
-        else:
-            self._vocab = learn.preprocessing.VocabularyProcessor.restore(os.path.join(self.checkpoint_dir, "vocab"))
-            vocab_size = len(self._vocab.vocabulary_)
-            with tf.variable_scope("Word_Embedding"):
-                embeddings = tf.Variable(tf.constant(0, 0),
-                        shape=[vocab_size, self._embedding_size],
-                        trainable=False, name="W")
+        vocab_size = len(self._vocab.vocabulary_)
+        with tf.variable_scope("Word_Embedding"):
+            embeddings = tf.get_variable(name="W", shape=init_embedding.shape,
+                    initializer=tf.constant_initializer(init_embedding), trainable=False)
 
 
         if self._encoder == "CNN":
@@ -131,19 +125,14 @@ class NNModel:
             with tf.variable_scope("{0}_regressor".format(self._task_names[idx])):
 
                 labels = tf.concat([1-gts, gts], 1)
-                labels = tf.Print(labels, [labels], "labels: ", summarize=6)
                 logits = tf.layers.dense(input_encoded, 2,
                         kernel_regularizer=tf.contrib.layers.l2_regularizer(
                             self._l2_reg_lambda))
 
-
                 predictions = tf.argmax(logits, 1, name="predictions")
-                predictions = tf.Print(predictions, [predictions], "Pred: ")
                 pooled_logits.append(tf.nn.softmax(logits))
 
                 losses = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels)
-
-
 
                 self.eval_metrics["{0}/Accuracy".format(self._task_names[idx])] = (
                         tf.metrics.accuracy(gts, predictions))
@@ -245,35 +234,48 @@ class NNModel:
         return cnn_encoding
 
 
+    def _RNNCells(self):
+        if self._rnn_cell_type == "GRU":
+            cells= tf.contrib.rnn.MultiRNNCell(
+                    [tf.nn.rnn_cell.GRUCell(self._embedding_size)
+                        for x in range(self._rnn_num_layers)], state_is_tuple=True)
+        elif self._rnn_cell_type == "LSTM":
+            cells= tf.contrib.rnn.MultiRNNCell(
+                    [tf.nn.rnn_cell.LSTMCell(self._embedding_size)
+                    for x in range(self._rnn_num_layers)], state_is_tuple=True)
+        return cells
+
     def _RNNLayers(self, embeddings):
         _, fw_embeddings = self._LookupEmbeddings(embeddings, self.input_x)
 
-        if self.rnn_bidirectional:
-            bw_embeddings = self._LookupEmbeddings(embeddings, self.input_x_bw)
+        if self._rnn_bidirectional:
+            _, bw_embeddings = self._LookupEmbeddings(embeddings, self.input_x_bw)
 
         with tf.variable_scope("RNN"):
 
-            if self._rnn_cell_type == "GRU":
-                fw_cells= tf.contrib.rnn.MultiRNNCell(
-                        [tf.nn.rnn_cell.GRUCell(self._embedding_size)
-                            for x in range(self._rnn_num_layers)], state_is_tuple=True)
-            elif self._rnn_cell_type == "LSTM":
-                fw_cells= tf.contrib.rnn.MultiRNNCell(
-                        [tf.nn.rnn_cell.LSTMCell(self._embedding_size)
-                            for x in range(self._rnn_num_layers)], state_is_tuple=True)
-            _, fw_state = tf.nn.dynamic_rnn(fw_cells, fw_embeddings,
-                    sequence_length=self.input_l, dtype=tf.float32)
+            with tf.variable_scope("forward"):
+                fw_cells = self._RNNCells()
+                _, fw_state = tf.nn.dynamic_rnn(fw_cells, fw_embeddings,
+                        sequence_length=self.input_l, dtype=tf.float32)
+                fw_encoding = fw_state[-1]
 
-            fw_encoding = fw_state[-1]
+            if self._rnn_bidirectional:
+                with tf.variable_scope("backward"):
+                    bw_cells = self._RNNCells()
+                    _, bw_state = tf.nn.dynamic_rnn(bw_cells, bw_embeddings,
+                            sequence_length=self.input_l, dtype=tf.float32)
 
-            if self._lstm_bidirectional:
-                pass
+                    bw_encoding = bw_state[-1]
+                rnn_encoding = tf.concat([fw_encoding, bw_encoding], axis=1)
             else:
-                lstm_encoding = fw_encoding
+                rnn_encoding = fw_encoding
 
-            lstm_encoding = tf.layers.dense(lstm_encoding, self._encoding_size)
+            with tf.variable_scope("dropout"):
+                rnn_encoding = tf.nn.dropout(rnn_encoding, 1-self.dropout)
 
-        return lstm_encoding
+            rnn_encoding = tf.layers.dense(rnn_encoding, self._encoding_size)
+
+        return rnn_encoding
 
 
 def main():
@@ -287,13 +289,15 @@ def main():
             cnn_filter_sizes=list(map(int, FLAGS.cnn_filter_sizes.split(","))),
             cnn_num_filters=FLAGS.cnn_num_filters,
             rnn_cell_type=FLAGS.rnn_cell_type,
-            rnn_bidirectionral=FLAGS.rnn_bidirectionral,
+            rnn_bidirectional=FLAGS.rnn_bidirectional,
             rnn_num_layers=FLAGS.rnn_num_layers)
 
     document_reader = nyt_reader.NYTReader(genre=FLAGS.genre)
 
     if FLAGS.mode == MODE_TRAIN:
         nn_utils.train(model, document_reader, FLAGS)
+    elif FLAGS.model == MODEL_INFER:
+        pass
 
 
 if __name__ == "__main__":
@@ -301,15 +305,15 @@ if __name__ == "__main__":
     flags.DEFINE_string("genre", "Science", "Genre name")
     flags.DEFINE_string("mode", "train", "Model mode")
     flags.DEFINE_integer("batch_size", 64, "Batch Size (default: 64)")
-    flags.DEFINE_integer("num_epochs", 100, "Number of training epochs (default: 200)")
+    flags.DEFINE_integer("num_epochs", 100, "Number of training epochs (default: 100)")
     tf.flags.DEFINE_integer("evaluate_every", 50,
         "Evaluate model on dev set after this many steps (default: 100)")
     tf.flags.DEFINE_integer("checkpoint_every", 1000,
         "Save model after this many steps (default: 1000)")
-    flags.DEFINE_float("dropout", 0.4, "dropout")
+    flags.DEFINE_float("dropout", 0, "dropout")
     flags.DEFINE_float("learning_rate", 1e-3, "learning rate")
     flags.DEFINE_integer("max_document_length", 300, "Max document length")
-    flags.DEFINE_bool("rnn_bidirectionral", False,
+    flags.DEFINE_bool("rnn_bidirectional", True,
         "Whther rnn is undirectional or bidirectional")
     flags.DEFINE_string("rnn_cell_type", "GRU", "RNN cell type, GRU or LSTM")
     flags.DEFINE_integer("rnn_num_layers", 2, "Number of layers of RNN")
